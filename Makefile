@@ -21,7 +21,7 @@ test:
 	uv run pytest
 
 install:
-	uv sync --extra dev
+	uv sync
 
 gen-keypair:
 	uv run python -m app.gen_keypair

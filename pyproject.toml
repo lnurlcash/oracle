@@ -13,13 +13,18 @@ dependencies = [
   "sqlalchemy>=2.0.0",
   "aiosqlite>=0.20.0",
   "coincurve>=20.0.0",
+  # runtime dependency, not just a test tool - app/main.py's lifespan
+  # creates the shared AsyncClient, and app/services/price_source.py /
+  # app/endpoints/admin.py use it at request time for btc-price
+  # auto-resolve. Must stay out of [dependency-groups], which the
+  # Dockerfile's --no-dev sync deliberately excludes from the image.
+  "httpx>=0.28.0",
 ]
 
 [dependency-groups]
 dev = [
   "pytest>=8.0.0",
   "pytest-asyncio>=0.23.0",
-  "httpx>=0.28.0",
   "ruff>=0.9.0",
   "mypy>=1.13.0",
 ]

@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>lnurlcash-oracle admin</title>
+<!--
+  A single self-contained static page, no build step, no external
+  dependencies - matches this service's own Python-only, no-migrations
+  posture. Every mutating call still goes through the real admin API
+  (app/endpoints/admin.py) and still requires the real X-Admin-Key header;
+  this page is just a shell around it, not a second source of authority.
+  The admin key is kept ONLY in this browser tab's sessionStorage (cleared
+  on tab close) and sent as a request header to THIS SAME origin - never
+  persisted server-side, never sent anywhere else. Serving this page needs
+  no auth of its own (same posture as GET /events or FastAPI's own /docs):
+  it reveals no secret, and every privileged action still checks the key
+  server-side regardless of what this page does or doesn't enforce
+  client-side.
+-->
+<style>
+  :root {
+    color-scheme: light dark;
+    --border: #8888;
+    --danger: #c0392b;
+    --ok: #1e8449;
+    --muted: #777;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 960px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-top: 2.5rem; }
+  .card {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+  }
+  label { display: block; font-size: 0.85rem; margin: 0.6rem 0 0.2rem; }
+  input, select {
+    width: 100%;
+    padding: 0.4rem 0.5rem;
+    font-size: 0.95rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+  }
+  button {
+    margin-top: 0.75rem;
+    padding: 0.45rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  button:hover { border-color: currentColor; }
+  button.danger { border-color: var(--danger); color: var(--danger); }
+  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
+  th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); font-size: 0.9rem; vertical-align: top; }
+  .muted { color: var(--muted); font-size: 0.85rem; }
+  .status-announced { color: #b8860b; }
+  .status-resolved { color: var(--ok); }
+  .error { color: var(--danger); white-space: pre-wrap; margin-top: 0.5rem; }
+  .row { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; }
+  .row > * { flex: 1; min-width: 140px; }
+  .outcome-list { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0.4rem 0; }
+  .outcome-chip { border: 1px solid var(--border); border-radius: 999px; padding: 0.15rem 0.6rem; font-size: 0.85rem; display: flex; gap: 0.4rem; align-items: center; }
+  .outcome-chip button { margin: 0; padding: 0 0.2rem; border: none; font-size: 0.9rem; }
+  code { font-size: 0.85rem; word-break: break-all; }
+  .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+  .actions button { margin-top: 0; }
+  .resolve-form { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px dashed var(--border); }
+</style>
+</head>
+<body>
+
+<h1>lnurlcash-oracle admin</h1>
+<p class="muted">
+  Not trustless - whoever holds the admin key below can announce and
+  resolve events for this oracle. Every action here calls the same
+  <code>/admin/*</code> API a script could; this page adds no authority of
+  its own. See <a href="/">/</a> for the service's own trust-model
+  statement.
+</p>
+
+<div class="card">
+  <h2 style="margin-top:0">Admin key</h2>
+  <label for="admin-key">X-Admin-Key</label>
+  <input id="admin-key" type="password" autocomplete="off" placeholder="paste the admin key" />
+  <div class="actions">
+    <button id="save-key">Save for this tab</button>
+    <button id="clear-key" class="danger">Clear</button>
+  </div>
+  <p class="muted" id="key-status"></p>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0">This oracle</h2>
+  <p><strong>Pubkey:</strong> <code id="oracle-pubkey">loading…</code></p>
+</div>
+
+<h2>Announce a new event</h2>
+<div class="card">
+  <div class="row">
+    <div>
+      <label for="f-event-id">Event id</label>
+      <input id="f-event-id" placeholder="btc-100k-2026" />
+    </div>
+    <div>
+      <label for="f-category">Category</label>
+      <input id="f-category" list="category-options" placeholder="btc-price" />
+      <datalist id="category-options">
+        <option value="btc-price"></option>
+        <option value="sports"></option>
+        <option value="curated"></option>
+      </datalist>
+    </div>
+    <div>
+      <label for="f-maturity">Matures at</label>
+      <input id="f-maturity" type="datetime-local" />
+    </div>
+  </div>
+
+  <div id="threshold-field" style="display:none">
+    <label for="f-threshold">Price threshold (USD)</label>
+    <input id="f-threshold" type="number" step="0.01" min="0" placeholder="100000" />
+  </div>
+
+  <div id="outcomes-field">
+    <label>Outcomes</label>
+    <div class="outcome-list" id="outcome-chips"></div>
+    <div class="row">
+      <input id="f-new-outcome" placeholder="e.g. Lakers win" />
+      <button id="add-outcome" type="button">Add outcome</button>
+    </div>
+  </div>
+  <p class="muted" id="btc-price-note" style="display:none">
+    "btc-price" always resolves to exactly ["above", "below"] - fixed
+    automatically, not editable here.
+  </p>
+
+  <button id="announce-btn">Announce event</button>
+  <div class="error" id="announce-error"></div>
+</div>
+
+<h2>Events</h2>
+<div class="card">
+  <button id="refresh-events" type="button">Refresh</button>
+  <div class="error" id="events-error"></div>
+  <table id="events-table">
+    <thead>
+      <tr><th>Event</th><th>Category</th><th>Outcomes</th><th>Matures</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody id="events-body"></tbody>
+  </table>
+</div>
+
+<script>
+(() => {
+  const KEY_STORAGE = 'lnurlcash_oracle_admin_key'
+
+  const $ = id => document.getElementById(id)
+  const adminKeyInput = $('admin-key')
+  const keyStatus = $('key-status')
+
+  const loadKey = () => {
+    try { return sessionStorage.getItem(KEY_STORAGE) || '' } catch { return '' }
+  }
+  const saveKey = (value) => {
+    try { sessionStorage.setItem(KEY_STORAGE, value) } catch {}
+  }
+  const clearKey = () => {
+    try { sessionStorage.removeItem(KEY_STORAGE) } catch {}
+  }
+
+  const refreshKeyStatus = () => {
+    keyStatus.textContent = loadKey()
+      ? 'A key is saved for this tab.'
+      : 'No key saved - announcing/resolving will fail until one is set.'
+  }
+  adminKeyInput.value = loadKey()
+  refreshKeyStatus()
+
+  $('save-key').onclick = () => {
+    saveKey(adminKeyInput.value.trim())
+    refreshKeyStatus()
+  }
+  $('clear-key').onclick = () => {
+    clearKey()
+    adminKeyInput.value = ''
+    refreshKeyStatus()
+  }
+
+  // ---- fetch helpers ----
+
+  const api = async (path, options = {}) => {
+    const res = await fetch(path, options)
+    let body = null
+    try { body = await res.json() } catch {}
+    if (!res.ok) {
+      const detail = body && typeof body.detail === 'string' ? body.detail : `HTTP ${res.status}`
+      throw new Error(detail)
+    }
+    return body
+  }
+
+  const adminApi = (path, method, jsonBody) => api(path, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Admin-Key': loadKey()
+    },
+    body: jsonBody !== undefined ? JSON.stringify(jsonBody) : undefined
+  })
+
+  // ---- oracle pubkey ----
+
+  api('/oracle-pubkey')
+    .then(body => { $('oracle-pubkey').textContent = body.oraclePubkeyHex })
+    .catch(err => { $('oracle-pubkey').textContent = 'error: ' + err.message })
+
+  // ---- announce form ----
+
+  let outcomes = []
+  const renderOutcomeChips = () => {
+    const box = $('outcome-chips')
+    box.innerHTML = ''
+    outcomes.forEach((o, i) => {
+      const chip = document.createElement('span')
+      chip.className = 'outcome-chip'
+      const text = document.createElement('span')
+      text.textContent = o
+      const remove = document.createElement('button')
+      remove.type = 'button'
+      remove.textContent = '✕'
+      remove.onclick = () => { outcomes.splice(i, 1); renderOutcomeChips() }
+      chip.append(text, remove)
+      box.appendChild(chip)
+    })
+  }
+
+  const isBtcPrice = () => $('f-category').value.trim() === 'btc-price'
+
+  const syncCategoryFields = () => {
+    const btc = isBtcPrice()
+    $('threshold-field').style.display = btc ? '' : 'none'
+    $('outcomes-field').style.display = btc ? 'none' : ''
+    $('btc-price-note').style.display = btc ? '' : 'none'
+  }
+  $('f-category').addEventListener('input', syncCategoryFields)
+  syncCategoryFields()
+
+  $('add-outcome').onclick = () => {
+    const value = $('f-new-outcome').value.trim()
+    if (value && !outcomes.includes(value)) {
+      outcomes.push(value)
+      renderOutcomeChips()
+    }
+    $('f-new-outcome').value = ''
+  }
+
+  $('announce-btn').onclick = async () => {
+    const errBox = $('announce-error')
+    errBox.textContent = ''
+    try {
+      const eventId = $('f-event-id').value.trim()
+      const category = $('f-category').value.trim()
+      const maturityRaw = $('f-maturity').value
+      if (!eventId) throw new Error('Enter an event id.')
+      if (!category) throw new Error('Enter a category.')
+      if (!maturityRaw) throw new Error('Pick when this event matures.')
+      const maturityTime = Math.floor(new Date(maturityRaw).getTime() / 1000)
+
+      const body = {
+        eventId,
+        category,
+        maturityTime,
+        outcomes: isBtcPrice() ? [] : outcomes
+      }
+      if (isBtcPrice()) {
+        const threshold = Number($('f-threshold').value)
+        if (!(threshold > 0)) throw new Error('Enter a positive price threshold.')
+        body.priceThresholdUsd = threshold
+      }
+
+      await adminApi('/admin/events', 'POST', body)
+
+      // reset the form on success
+      $('f-event-id').value = ''
+      $('f-category').value = ''
+      $('f-maturity').value = ''
+      $('f-threshold').value = ''
+      outcomes = []
+      renderOutcomeChips()
+      syncCategoryFields()
+      await loadEvents()
+    } catch (err) {
+      errBox.textContent = err.message
+    }
+  }
+
+  // ---- events list ----
+
+  const fmtTime = (unixSeconds) => new Date(unixSeconds * 1000).toLocaleString()
+
+  const loadEvents = async () => {
+    const errBox = $('events-error')
+    errBox.textContent = ''
+    const body = $('events-body')
+    body.innerHTML = '<tr><td colspan="6" class="muted">loading…</td></tr>'
+    let events
+    try {
+      events = await api('/events')
+    } catch (err) {
+      errBox.textContent = err.message
+      body.innerHTML = ''
+      return
+    }
+    body.innerHTML = ''
+    if (events.length === 0) {
+      body.innerHTML = '<tr><td colspan="6" class="muted">No events yet.</td></tr>'
+      return
+    }
+    for (const ev of events) {
+      body.appendChild(renderEventRow(ev))
+    }
+  }
+
+  const renderEventRow = (ev) => {
+    const tr = document.createElement('tr')
+
+    const cell = (text) => { const td = document.createElement('td'); td.textContent = text; return td }
+    tr.appendChild(cell(ev.eventId))
+    tr.appendChild(cell(ev.category + (ev.priceThresholdUsd ? ` (≥ ${ev.priceThresholdUsd} USD)` : '')))
+    tr.appendChild(cell(ev.outcomes.join(', ')))
+    tr.appendChild(cell(fmtTime(ev.maturityTime)))
+
+    const statusTd = document.createElement('td')
+    statusTd.textContent = ev.status
+    statusTd.className = ev.status === 'resolved' ? 'status-resolved' : 'status-announced'
+    tr.appendChild(statusTd)
+
+    const actionsTd = document.createElement('td')
+    if (ev.status === 'resolved') {
+      const link = document.createElement('a')
+      link.href = `/events/${encodeURIComponent(ev.eventId)}/attestation`
+      link.textContent = 'view attestation'
+      link.target = '_blank'
+      link.rel = 'noopener'
+      actionsTd.appendChild(link)
+    } else {
+      const wrap = document.createElement('div')
+
+      if (ev.category === 'btc-price') {
+        const autoBtn = document.createElement('button')
+        autoBtn.type = 'button'
+        autoBtn.textContent = 'Auto-resolve'
+        autoBtn.style.marginTop = '0'
+        autoBtn.onclick = () => autoResolve(ev.eventId, tr)
+        wrap.appendChild(autoBtn)
+      }
+
+      const resolveBtn = document.createElement('button')
+      resolveBtn.type = 'button'
+      resolveBtn.textContent = 'Resolve manually'
+      resolveBtn.style.marginTop = '0'
+      resolveBtn.style.marginLeft = '0.4rem'
+      resolveBtn.onclick = () => toggleResolveForm(ev, tr)
+      wrap.appendChild(resolveBtn)
+
+      actionsTd.appendChild(wrap)
+    }
+    tr.appendChild(actionsTd)
+    return tr
+  }
+
+  const autoResolve = async (eventId, tr) => {
+    try {
+      await adminApi(`/admin/events/${encodeURIComponent(eventId)}/auto-resolve`, 'POST')
+      await loadEvents()
+    } catch (err) {
+      showRowError(tr, err.message)
+    }
+  }
+
+  const toggleResolveForm = (ev, tr) => {
+    const existing = tr.querySelector('.resolve-inline')
+    if (existing) { existing.remove(); return }
+
+    const holder = document.createElement('tr')
+    holder.className = 'resolve-inline'
+    const td = document.createElement('td')
+    td.colSpan = 6
+    const form = document.createElement('div')
+    form.className = 'resolve-form'
+
+    const outcomeSelect = document.createElement('select')
+    for (const o of ev.outcomes) {
+      const opt = document.createElement('option')
+      opt.value = o
+      opt.textContent = o
+      outcomeSelect.appendChild(opt)
+    }
+
+    const sourceInput = document.createElement('input')
+    sourceInput.placeholder = 'source citation, e.g. "coinbase BTC-USD index at maturity"'
+    sourceInput.style.marginTop = '0.4rem'
+
+    const submitBtn = document.createElement('button')
+    submitBtn.type = 'button'
+    submitBtn.textContent = 'Submit resolution'
+    submitBtn.onclick = async () => {
+      try {
+        await adminApi(`/admin/events/${encodeURIComponent(ev.eventId)}/resolve`, 'POST', {
+          outcome: outcomeSelect.value,
+          source: sourceInput.value.trim() || 'operator resolution (no source given)'
+        })
+        await loadEvents()
+      } catch (err) {
+        showRowError(holder, err.message)
+      }
+    }
+
+    form.append(outcomeSelect, sourceInput, submitBtn)
+    td.appendChild(form)
+    holder.appendChild(td)
+    tr.after(holder)
+  }
+
+  const showRowError = (tr, message) => {
+    let err = tr.querySelector('.row-error')
+    if (!err) {
+      err = document.createElement('div')
+      err.className = 'error row-error'
+      tr.lastElementChild.appendChild(err)
+    }
+    err.textContent = message
+  }
+
+  $('refresh-events').onclick = loadEvents
+  loadEvents()
+})()
+</script>
+</body>
+</html>

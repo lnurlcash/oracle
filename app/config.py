@@ -29,5 +29,18 @@ class Settings(BaseSettings):
     # lnbits-price-aggregator) to actually use auto-resolve.
     PRICE_SOURCE_URL: str = "https://price.lnurlcash.com"
 
+    # app/services/scheduler.py - a background asyncio loop (started in
+    # app/main.py's own lifespan) that announces a fresh "will BTC be
+    # above its own price right now" event every hour and every day, and
+    # auto-resolves any btc-price event whose maturityTime has passed. On
+    # by default - it's harmless with the default PRICE_SOURCE_URL too
+    # (a fetch failure is logged and retried next tick, never raised -
+    # see scheduler.py's own tests), it just won't announce/resolve
+    # anything until PRICE_SOURCE_URL points at a real, reachable feed.
+    # Set to false for a purely operator-curated deployment (the only
+    # posture v1 originally had).
+    SCHEDULER_ENABLED: bool = True
+    SCHEDULER_INTERVAL_SECONDS: int = 60
+
 
 settings = Settings()  # type: ignore[call-arg]  # required fields come from .env

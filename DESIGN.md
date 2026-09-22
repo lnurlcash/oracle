@@ -69,10 +69,22 @@ ANNOUNCE (admin) → (wait until maturityTime) → RESOLVE + ATTEST (admin)
   be a follow-up step that could be skipped or lost to a crash, or
   duplicated across two independently-maintained resolution paths.
 
+**A third path exists for `btc-price` specifically: fully automatic, both
+ends.** `app/services/scheduler.py` (on by default - `SCHEDULER_ENABLED`,
+harmless until `PRICE_SOURCE_URL` points at a real feed) runs a
+background loop that announces a fresh `btc-price` event every
+hour and every day on its own (thresholded at whatever the real median
+price is the moment it's created - "will BTC be above its own price right
+now, an hour/a day from now") and auto-resolves any `btc-price` event
+once its `maturityTime` passes, with no admin action at all. It only ever
+touches events it created itself the same automatic way - a manually
+announced `btc-price` event still needs a human (or a script) to call
+`.../resolve` or `.../auto-resolve` explicitly. See `app/static/admin.html`
+(served at `GET /admin`) for a small UI wrapping the manual paths.
+
 Not built yet: user-submitted event proposals (curation stays
-operator-only in v1), multi-oracle threshold schemes, a scheduled job
-that calls auto-resolve on its own once `maturityTime` passes (today it's
-still an explicit admin action, just not a manual price lookup). See
+operator-only in v1), multi-oracle threshold schemes, the same kind of
+automatic creation/resolution for any category besides `btc-price`. See
 "Roadmap" below.
 
 ## Event categories (v1 scope)
@@ -94,6 +106,10 @@ defaults to `https://price.lnurlcash.com` (not yet a live deployment) -
 point it at a real `lnbits-price-aggregator` instance to actually use
 auto-resolve (see `.env.example`).
 
+With `SCHEDULER_ENABLED=true`, this oracle also announces its own
+recurring `btc-hourly-<hour>` / `btc-daily-<date>` events on this same
+category, with no operator action - see "Event lifecycle" above.
+
 ## API
 
 Matches exactly what `lnurl-wallet`'s `dlc`/`betlocker` addons already
@@ -104,6 +120,9 @@ fetch call, not a reshaping layer.
 
 ```
 GET  /                                    → service info + trust model statement
+GET  /admin                               → a small static admin UI (app/static/admin.html) -
+                                              no auth to VIEW, every action it takes still needs
+                                              the real X-Admin-Key, same as any other caller
 GET  /oracle-pubkey                       → {oraclePubkeyHex}
 GET  /events                              → [{eventId, category, outcomes, maturityTime, status}]
 GET  /events/{eventId}/announcement       → {oraclePubkeyHex, nonceHex, outcomes, eventId, maturityTime}
@@ -112,6 +131,8 @@ GET  /events/{eventId}/attestation        → {outcome, signatureHex, resolvedAt
 
 POST /admin/events                        → announce (X-Admin-Key required)
 POST /admin/events/{eventId}/resolve      → resolve + attest (X-Admin-Key required)
+POST /admin/events/{eventId}/auto-resolve → resolve + attest via PRICE_SOURCE_URL,
+                                              btc-price only (X-Admin-Key required)
 ```
 
 ## Key management
@@ -162,14 +183,15 @@ tables created on startup).
 
 ## Roadmap beyond v1
 
-- **Wallet-integrated event browser** - Betlocker fetches `GET /events`
-  directly instead of copy-pasted pubkey/nonce/outcomes.
+Shipped since the last pass: lnurl-wallet's Betlocker addon now fetches
+`GET /events`/`GET /events/{id}/announcement`/`GET /events/{id}/attestation`
+directly (`src/addons/dlc/oracleClient.ts`) instead of copy-pasted
+pubkey/nonce/outcomes; and `app/services/scheduler.py` (on by default)
+both announces and auto-resolves recurring `btc-price` events with no
+operator action, once `PRICE_SOURCE_URL` points at a real feed.
+
 - **Multi-oracle threshold** (2-of-3 must agree) - genuinely bigger scope,
   deliberately deferred, same call made for the wallet-side addon itself.
-- **A scheduler for `btc-price` auto-resolve** - a background job that
-  calls `auto_resolve_btc_price_event` itself once `maturityTime` passes,
-  instead of an operator still having to trigger the (already automated)
-  price lookup by hand.
 - **Automated sports-outcome resolution**, the same shape `btc-price`
   already has (a stated sports-data API instead of a stated price index),
   reducing "operator curates by hand" to just the medium-ambiguity

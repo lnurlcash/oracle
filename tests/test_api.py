@@ -57,6 +57,16 @@ async def test_root_states_the_trust_model_plainly(client):
     assert "not" in body["trustModel"].lower()
 
 
+async def test_admin_ui_is_served_and_needs_no_auth_to_view(client):
+    # the page itself is a public shell (same posture as GET /events or
+    # FastAPI's own /docs) - every PRIVILEGED action it makes still checks
+    # X-Admin-Key server-side, exactly as any other caller would
+    resp = await client.get("/admin")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "X-Admin-Key" in resp.text
+
+
 async def test_full_lifecycle_announce_then_resolve_then_attest(client):
     maturity = _future()
     create = await client.post(

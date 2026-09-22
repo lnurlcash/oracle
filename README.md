@@ -48,6 +48,36 @@ curl -X POST http://localhost:8420/admin/events/btc-100k-2026/resolve \
 curl http://localhost:8420/events/btc-100k-2026/attestation
 ```
 
+## Admin UI
+
+A small self-contained page at `http://localhost:8420/admin` (no build
+step, no external dependencies) wraps the `curl` calls above: announce an
+event, list events, and resolve one (manually, or with one click via
+"Auto-resolve" for `btc-price` events) without touching a terminal. The
+admin key you enter there stays in that browser tab's `sessionStorage`
+only, sent as `X-Admin-Key` to this same service - every action it takes
+still goes through the same `/admin/*` API and the same server-side key
+check as any other caller.
+
+## Automatic btc-price events
+
+On by default (`SCHEDULER_ENABLED=true` in `.env.example`) - harmless
+until `PRICE_SOURCE_URL` points at a real, reachable price feed (a failed
+fetch is just logged and retried next tick). Once it does,
+`app/services/scheduler.py`'s background loop will, on its own:
+
+- announce a fresh `btc-price` event every hour and every day
+  (`btc-hourly-<hour>` / `btc-daily-<date>`), thresholded at whatever the
+  real median price is at the moment it's created ("will BTC be above its
+  own price right now, an hour/a day from now")
+- auto-resolve any `btc-price` event once its `maturityTime` has passed,
+  no admin action needed
+
+Manually-curated events (any other category, or a `btc-price` event you
+announce yourself) are completely unaffected - the scheduler only ever
+touches the events it created the same automatic way. Set
+`SCHEDULER_ENABLED=false` for a purely operator-curated deployment.
+
 ## Development
 
 ```bash

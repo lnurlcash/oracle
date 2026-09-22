@@ -115,8 +115,17 @@ category, with no operator action - see "Event lifecycle" above.
 Matches exactly what `lnurl-wallet`'s `dlc`/`betlocker` addons already
 expect (`oraclePubkeyHex`, `nonceHex`, `outcomes: string[]` for an
 announcement; `{outcome, signatureHex}` - 64-byte hex `R||s` - for an
-attestation), so a future "browse open events" picker in Betlocker is a
-fetch call, not a reshaping layer.
+attestation), so Betlocker's own "browse open events" picker
+(`src/addons/dlc/oracleClient.ts`) is a plain fetch call from the
+browser, not a reshaping layer.
+
+CORS is wide open (`allow_origins=["*"]`) but GET-only - same reasoning
+as `lnurl-mint`'s own CORSMiddleware (nothing here reads a cookie, so an
+open origin is safe), restricted to GET because this service's only
+non-GET routes are `/admin/*`, which must stay same-origin: a cross-
+origin `POST` never even gets a successful CORS preflight (Starlette
+refuses one outside `allow_methods`), on top of still needing the real
+`X-Admin-Key` regardless.
 
 ```
 GET  /                                    → service info + trust model statement

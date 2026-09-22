@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 from app import __version__
@@ -62,6 +63,27 @@ app = FastAPI(
         "does not provide."
     ),
     lifespan=lifespan,
+)
+
+# Public, read-only, cookie-free wire-protocol endpoints (events.router,
+# GET / below) - meant to be fetched cross-origin by arbitrary third-party
+# wallets, e.g. lnurl-wallet's own Betlocker/dlc oracleClient.ts running
+# from a browser at a different origin. Same reasoning as lnurl-mint's own
+# CORSMiddleware (server.py): nothing here reads a cookie, so a wide-open
+# origin is safe.
+#
+# allow_methods deliberately stays GET-only, UNLIKE mint's own "*" - this
+# service's only non-GET routes are /admin/* (real state-changing
+# actions), which must stay same-origin (curl, server-to-server, or this
+# service's own /admin page, always same-origin with itself). Restricting
+# to GET here isn't just "we don't need more": a cross-origin POST to
+# /admin/* would first need a CORS preflight, and Starlette's
+# CORSMiddleware refuses to approve one for a method outside
+# allow_methods - so this one line is what keeps a malicious page from
+# ever getting a browser to even ATTEMPT a cross-origin
+# /admin/events POST, on top of it needing the real X-Admin-Key regardless.
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"]
 )
 
 app.include_router(events.router)

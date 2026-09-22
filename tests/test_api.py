@@ -67,6 +67,33 @@ async def test_admin_ui_is_served_and_needs_no_auth_to_view(client):
     assert "X-Admin-Key" in resp.text
 
 
+async def test_cors_allows_a_public_get_cross_origin(client):
+    # a browser-based wallet at a different origin (e.g. lnurl-wallet's own
+    # Betlocker oracleClient.ts) needs this header to read the response at
+    # all - without it the request still succeeds server-side, but the
+    # browser blocks the caller from ever seeing the body
+    resp = await client.get("/events", headers={"Origin": "https://wallet.example.com"})
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == "*"
+
+
+async def test_cors_refuses_a_cross_origin_preflight_for_admin_routes(client):
+    # /admin/* must stay same-origin (curl, server-to-server, or this
+    # service's own /admin page) - allow_methods is deliberately GET-only,
+    # so Starlette's CORSMiddleware itself refuses to approve a preflight
+    # for POST, which stops a browser from ever sending the real request,
+    # on top of it needing the real X-Admin-Key regardless
+    resp = await client.options(
+        "/admin/events",
+        headers={
+            "Origin": "https://evil.example.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert resp.status_code == 400
+    assert "GET" == resp.headers["access-control-allow-methods"]
+
+
 async def test_full_lifecycle_announce_then_resolve_then_attest(client):
     maturity = _future()
     create = await client.post(

@@ -67,7 +67,7 @@ docker run --restart always -d --name lnurlcash-oracle \
   -e PORT=8420 \
   --env-file .env \
   -v "$(pwd)/data:/app/data" \
-  lnurlcash/lnurlcash-oracle          # or: make run
+  lnurlcash/oracle                    # or: make run
 ```
 
 The image runs as a non-root user; `--user` matches it to whichever host
@@ -86,7 +86,7 @@ holds a real signing key, see DESIGN.md's own "Key management" section.
 Pushing a `v*` tag (`git tag v1.2.0 && git push origin v1.2.0`) triggers
 `.github/workflows/release.yml`, which:
 
-- builds the image and pushes `lnurlcash/lnurlcash-oracle` to Docker Hub,
+- builds the image and pushes `lnurlcash/oracle` to Docker Hub,
   tagged `1.2.0`, `1.2`, `1`, and `latest`
 - creates a GitHub Release for the tag (via `gh release create
   --generate-notes`), with notes auto-generated from the commits/PRs
